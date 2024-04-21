@@ -1,13 +1,14 @@
+import 'dart:convert';
 import 'dart:developer';
 import 'dart:io';
 
 import 'package:bancode_scanner/home_page.dart';
+import 'package:bancode_scanner/model/api_response.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-
+import 'package:http/http.dart' as http;
 import 'package:bancode_scanner/app_colors.dart';
-
 import 'package:qr_code_scanner/qr_code_scanner.dart';
 
 class QRViewExample extends StatefulWidget {
@@ -21,6 +22,8 @@ class _QRViewExampleState extends State<QRViewExample> {
   Barcode? result;
   QRViewController? controller;
   final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
+  ApiResponse? apiResponse;
+  bool isloading = false;
 
   // In order to get hot reload to work we need to pause the camera if the platform
   // is android, or resume the camera if the platform is iOS.
@@ -51,8 +54,11 @@ class _QRViewExampleState extends State<QRViewExample> {
                   style: TextStyle(fontSize: 20),
                 ),
                 const Divider(),
-                if (result != null)
-                  BuildResultShow(result: result)
+                if (apiResponse != null)
+                  BuildResultShow(
+                    apiResponse: apiResponse,
+                    isLoading: isloading,
+                  )
                 else
                   const Text(''),
                 const SizedBox(
@@ -71,16 +77,16 @@ class _QRViewExampleState extends State<QRViewExample> {
           children: [
             ElevatedButton(
               onPressed: () {
-                if (result != null) {
-                  Navigator.of(context).pushAndRemoveUntil(
-                      MaterialPageRoute(
-                        builder: (context) => const HomePage(),
-                      ),
-                      (Route<dynamic> route) => false);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text('No Scan Information found!!')));
-                }
+                // if (result != null) {
+                Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(
+                      builder: (context) => const HomePage(),
+                    ),
+                    (Route<dynamic> route) => false);
+                // } else {
+                //   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                //       content: Text('No Scan Information found!!')));
+                // }
               },
               style: ElevatedButton.styleFrom(
                   backgroundColor: AppColros.primaryColos),
@@ -135,16 +141,34 @@ class _QRViewExampleState extends State<QRViewExample> {
       this.controller = controller;
     });
     controller.scannedDataStream.listen((scanData) {
-      controller.pauseCamera();
-      if (kDebugMode) {
-        print('--------------Scaned------');
-        print(scanData);
-        print('PPPPP');
+      if (isNumericUsingRegularExpression(scanData.code!)) {
+        controller.pauseCamera();
+        if (kDebugMode) {
+          print('--------------Scaned------');
+          print(scanData.code);
+          print('PPPPP');
+        }
+
+        callApi(scanData.code);
+        setState(() {
+          result = scanData;
+        });
       }
-      setState(() {
-        result = scanData;
-      });
     });
+  }
+
+  bool isNumericUsingRegularExpression(String string) {
+    final numericRegex = RegExp(r'^-?(([0-9]*)|(([0-9]*)\.([0-9]*)))$');
+
+    return numericRegex.hasMatch(string);
+  }
+
+  callApi(var code) async {
+    isloading = true;
+    setState(() {});
+    apiResponse = await getCallAPI(code: code);
+    isloading = false;
+    setState(() {});
   }
 
   void _onPermissionSet(BuildContext context, QRViewController ctrl, bool p) {
@@ -161,100 +185,161 @@ class _QRViewExampleState extends State<QRViewExample> {
     controller?.dispose();
     super.dispose();
   }
+
+  getCallAPI({required var code}) async {
+    try {
+      final response =
+          await http.get(Uri.parse('https://orginal.mallocsoft.com/$code'));
+      var data = jsonDecode(response.body);
+
+  
+      if (response.statusCode == 200 && data['Status'] == true) {
+        return ApiResponse.fromJson(data);
+      } else {
+        return ApiResponse(
+            message: data['message'], status: false, value: null);
+      }
+    } catch (e) {
+      print(e);
+      return ApiResponse(message: e.toString(), status: false, value: null);
+    }
+  }
 }
 
 class BuildResultShow extends StatelessWidget {
   const BuildResultShow({
     super.key,
-    required this.result,
+    required this.apiResponse,
+    required this.isLoading,
   });
 
-  final Barcode? result;
+  final ApiResponse? apiResponse;
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                flex: 1,
-                child: Text(
-                  'REG NO:',
-                  style: TextStyle(fontSize: 12),
+    if (isLoading) {
+      return const Padding(
+        padding: EdgeInsets.all(8.0),
+        child: Column(
+          children: [
+            CircularProgressIndicator(
+              strokeWidth: 6,
+            )
+          ],
+        ),
+      );
+    } else if (apiResponse!.status == true) {
+      return Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  flex: 1,
+                  child: Text(
+                    'Product:',
+                    style: TextStyle(fontSize: 12),
+                  ),
                 ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text(
-                  '${result!.code}',
-                  style: const TextStyle(fontSize: 12),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    '${apiResponse!.value!.product}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const Divider(),
-          const Row(
-            children: [
-              Expanded(
-                flex: 1,
-                child: Text(
-                  'BRAND:',
-                  style: TextStyle(fontSize: 12),
+              ],
+            ),
+            const Divider(),
+            Row(
+              children: [
+                const Expanded(
+                  flex: 1,
+                  child: Text(
+                    'EXPAIRE DATE:',
+                    style: TextStyle(fontSize: 12),
+                  ),
                 ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text(
-                  'Mojo',
-                  style: TextStyle(fontSize: 12),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    '${apiResponse!.value!.exdate}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const Divider(),
-          const Row(
-            children: [
-              Expanded(
-                flex: 1,
-                child: Text(
-                  'EXPAIRE DATE:',
-                  style: TextStyle(fontSize: 12),
+              ],
+            ),
+            const Divider(),
+            Row(
+              children: [
+                const Expanded(
+                  flex: 1,
+                  child: Text(
+                    'PRICE:',
+                    style: TextStyle(fontSize: 12),
+                  ),
                 ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text(
-                  '01-10-2024',
-                  style: TextStyle(fontSize: 12),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    '${apiResponse!.value!.price}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const Divider(),
-          const Row(
-            children: [
-              Expanded(
-                flex: 1,
-                child: Text(
-                  'WEIGHT',
-                  style: TextStyle(fontSize: 12),
+              ],
+            ),
+            const Divider(),
+            Row(
+              children: [
+                const Expanded(
+                  flex: 1,
+                  child: Text(
+                    'MESSAGE',
+                    style: TextStyle(fontSize: 12),
+                  ),
                 ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text(
-                  '250ml',
-                  style: TextStyle(fontSize: 12),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    '${apiResponse!.message}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const Divider(),
-        ],
-      ),
-    );
+              ],
+            ),
+            const Divider(),
+          ],
+        ),
+      );
+    } else {
+      return Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  flex: 1,
+                  child: Text(
+                    'MESSAGE',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    '${apiResponse!.message}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+            const Divider(),
+          ],
+        ),
+      );
+    }
   }
 }
